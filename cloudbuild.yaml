@@ -1,0 +1,92 @@
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _REGION: northamerica-northeast1
+
+  _REPO_NAME: forum-microservices
+
+steps:
+  # Build posts image
+  - name: gcr.io/cloud-builders/docker
+    dir: posts
+    args:
+      [
+        "build",
+        "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA",
+        "."
+      ]
+
+  # Build threads image
+  - name: gcr.io/cloud-builders/docker
+    dir: threads
+    args:
+      [
+        "build",
+        "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA",
+        "."
+      ]
+
+  # Build users image
+  - name: gcr.io/cloud-builders/docker
+    dir: users
+    args:
+      [
+        "build",
+        "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA",
+        "."
+      ]
+
+  # Push images
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"]
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"]
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA"]
+
+  # Deploy posts-service
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      [
+        "run", "deploy", "posts-service",
+        "--region", "$_REGION",
+        "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA",
+        "--platform", "managed",
+        "--allow-unauthenticated",
+        "--port=3000"
+      ]
+
+  # Deploy threads-service
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      [
+        "run", "deploy", "threads-service",
+        "--region", "$_REGION",
+        "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA",
+        "--platform", "managed",
+        "--allow-unauthenticated",
+        "--port=3000"
+      ]
+
+  # Deploy users-service
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      [
+        "run", "deploy", "users-service",
+        "--region", "$_REGION",
+        "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA",
+        "--platform", "managed",
+        "--allow-unauthenticated",
+        "--port=3000"
+      ]
+
+images:
+  - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"
+  - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"
+  - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA"
