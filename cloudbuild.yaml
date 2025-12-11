@@ -3,89 +3,147 @@ options:
 
 substitutions:
   _REGION: northamerica-northeast1
-
   _REPO_NAME: forum-microservices
 
 steps:
-  # Build posts image
-  - name: gcr.io/cloud-builders/docker
-    dir: posts
-    args:
-      [
-        "build",
-        "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA",
-        "."
-      ]
+# ----------------------------------------------------
+# Build Docker Images for Each Microservice
+# ----------------------------------------------------
+- name: gcr.io/cloud-builders/docker
+  id: "Build posts image"
+  dir: posts
+  args:
+    [
+      "build",
+      "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA",
+      "."
+    ]
 
-  # Build threads image
-  - name: gcr.io/cloud-builders/docker
-    dir: threads
-    args:
-      [
-        "build",
-        "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA",
-        "."
-      ]
+- name: gcr.io/cloud-builders/docker
+  id: "Build threads image"
+  dir: threads
+  args:
+    [
+      "build",
+      "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA",
+      "."
+    ]
 
-  # Build users image
-  - name: gcr.io/cloud-builders/docker
-    dir: users
-    args:
-      [
-        "build",
-        "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA",
-        "."
-      ]
+- name: gcr.io/cloud-builders/docker
+  id: "Build users image"
+  dir: users
+  args:
+    [
+      "build",
+      "-t", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA",
+      "."
+    ]
 
-  # Push images
-  - name: gcr.io/cloud-builders/docker
-    args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"]
+# ----------------------------------------------------
+# Smoke Test Each Microservice Container BEFORE Deployment
+# ----------------------------------------------------
 
-  - name: gcr.io/cloud-builders/docker
-    args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"]
+- name: gcr.io/cloud-builders/docker
+  id: "Test posts-service"
+  entrypoint: bash
+  args:
+    - "-c"
+    - |
+        echo "Running smoke test for posts-service..."
+        docker run -d --rm -p 3001:3000 --name posts-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA
+        sleep 5
+        curl -f http://localhost:3001/api/posts || (echo "Posts service test FAILED" && exit 1)
+        echo "Posts service test PASSED"
+        docker stop posts-test
 
-  - name: gcr.io/cloud-builders/docker
-    args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA"]
+- name: gcr.io/cloud-builders/docker
+  id: "Test threads-service"
+  entrypoint: bash
+  args:
+    - "-c"
+    - |
+        echo "Running smoke test for threads-service..."
+        docker run -d --rm -p 3002:3000 --name threads-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA
+        sleep 5
+        curl -f http://localhost:3002/api/threads || (echo "Threads service test FAILED" && exit 1)
+        echo "Threads service test PASSED"
+        docker stop threads-test
 
-  # Deploy posts-service
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
-    args:
-      [
-        "run", "deploy", "posts-service",
-        "--region", "$_REGION",
-        "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA",
-        "--platform", "managed",
-        "--allow-unauthenticated",
-        "--port=3000"
-      ]
+- name: gcr.io/cloud-builders/docker
+  id: "Test users-service"
+  entrypoint: bash
+  args:
+    - "-c"
+    - |
+        echo "Running smoke test for users-service..."
+        docker run -d --rm -p 3003:3000 --name users-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA
+        sleep 5
+        curl -f http://localhost:3003/api/users || (echo "Users service test FAILED" && exit 1)
+        echo "Users service test PASSED"
+        docker stop users-test
 
-  # Deploy threads-service
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
-    args:
-      [
-        "run", "deploy", "threads-service",
-        "--region", "$_REGION",
-        "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA",
-        "--platform", "managed",
-        "--allow-unauthenticated",
-        "--port=3000"
-      ]
+# ----------------------------------------------------
+# Push Images to Artifact Registry
+# ----------------------------------------------------
 
-  # Deploy users-service
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
-    entrypoint: gcloud
-    args:
-      [
-        "run", "deploy", "users-service",
-        "--region", "$_REGION",
-        "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA",
-        "--platform", "managed",
-        "--allow-unauthenticated",
-        "--port=3000"
-      ]
+- name: gcr.io/cloud-builders/docker
+  id: "Push posts image"
+  args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"]
 
+- name: gcr.io/cloud-builders/docker
+  id: "Push threads image"
+  args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"]
+
+- name: gcr.io/cloud-builders/docker
+  id: "Push users image"
+  args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA"]
+
+# ----------------------------------------------------
+# Deploy Services to Cloud Run
+# ----------------------------------------------------
+
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  id: "Deploy posts-service"
+  entrypoint: gcloud
+  args:
+    [
+      "run", "deploy", "posts-service",
+      "--region", "$_REGION",
+      "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA",
+      "--platform", "managed",
+      "--allow-unauthenticated",
+      "--port=3000"
+    ]
+
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  id: "Deploy threads-service"
+  entrypoint: gcloud
+  args:
+    [
+      "run", "deploy", "threads-service",
+      "--region", "$_REGION",
+      "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA",
+      "--platform", "managed",
+      "--allow-unauthenticated",
+      "--port=3000"
+    ]
+
+- name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  id: "Deploy users-service"
+  entrypoint: gcloud
+  args:
+    [
+      "run", "deploy", "users-service",
+      "--region", "$_REGION",
+      "--image", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA",
+      "--platform", "managed",
+      "--allow-unauthenticated",
+      "--port=3000"
+    ]
+
+# ----------------------------------------------------
+# Image outputs (visible in Cloud Build history)
+# ----------------------------------------------------
 images:
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"
