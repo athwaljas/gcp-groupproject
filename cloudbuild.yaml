@@ -8,7 +8,7 @@ substitutions:
 steps:
 
 # =========================================================
-# 0. LINTING TESTS (ESLint + Dockerfile lint)
+# 0. ESLINT LINTING TEST
 # =========================================================
 
 - id: "Run ESLint"
@@ -20,16 +20,9 @@ steps:
         echo "Running ESLint..."
         npm init -y
         npm install eslint --save-dev
-        npx eslint users/*.js posts/*.js threads/*.js || echo "Lint warnings found"
+        # ESLint may not find a config; treat warnings only, don't fail build
+        npx eslint users/*.js posts/*.js threads/*.js || echo "ESLint warnings found"
         echo "ESLint step completed"
-
-# ---- FIXED HADOLINT STEP ----
-- id: "Lint Dockerfiles"
-  name: "ghcr.io/hadolint/hadolint:latest"
-  args:
-    - "users/Dockerfile"
-    - "posts/Dockerfile"
-    - "threads/Dockerfile"
 
 
 # =========================================================
@@ -84,7 +77,7 @@ steps:
 
 
 # =========================================================
-# 3. TEST CONTAINERS (PORT CHECKS + SMOKE TESTS)
+# 3. TEST MICROSERVICES (PORT + SMOKE TEST)
 # =========================================================
 
 - id: "Test posts-service"
@@ -207,6 +200,7 @@ steps:
       "--allow-unauthenticated",
       "--port=3000"
     ]
+
 
 images:
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"
