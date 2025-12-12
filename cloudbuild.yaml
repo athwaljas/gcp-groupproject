@@ -6,11 +6,59 @@ substitutions:
   _REPO_NAME: forum-microservices
 
 steps:
-# ----------------------------------------------------
-# Build Docker Images for Each Microservice
-# ----------------------------------------------------
-- name: gcr.io/cloud-builders/docker
-  id: "Build posts image"
+
+# =========================================================
+# 0. LINTING TESTS (ESLint + Dockerfile lint)
+# =========================================================
+
+# Install dependencies and run ESLint on JS files
+- id: "Run ESLint"
+  name: "node:18"
+  entrypoint: bash
+  args:
+    - "-c"
+    - |
+        echo "Running ESLint..."
+        npm init -y
+        npm install eslint --save-dev
+        npx eslint users/*.js posts/*.js threads/*.js || (echo "Linting FAILED" && exit 1)
+        echo "ESLint PASSED"
+
+# Lint Dockerfiles using hadolint
+- id: "Lint Dockerfiles"
+  name: "ghcr.io/hadolint/hadolint:latest"
+  entrypoint: sh
+  args:
+    - "-c"
+    - |
+        echo "Linting Dockerfiles..."
+        hadolint users/Dockerfile || exit 1
+        hadolint posts/Dockerfile || exit 1
+        hadolint threads/Dockerfile || exit 1
+        echo "Dockerfile lint PASSED"
+
+# =========================================================
+# 1. VALIDATE JSON FILES BEFORE BUILDING
+# =========================================================
+
+- id: "Validate JSON files"
+  name: "node:18"
+  entrypoint: bash
+  args:
+    - "-c"
+    - |
+        echo "Validating JSON files..."
+        node -e "JSON.parse(require('fs').readFileSync('./users/db.json'))" || exit 1
+        node -e "JSON.parse(require('fs').readFileSync('./posts/db.json'))" || exit 1
+        node -e "JSON.parse(require('fs').readFileSync('./threads/db.json'))" || exit 1
+        echo "JSON validation PASSED"
+
+# =========================================================
+# 2. BUILD DOCKER IMAGES
+# =========================================================
+
+- id: "Build posts-service"
+  name: gcr.io/cloud-builders/docker
   dir: posts
   args:
     [
@@ -19,8 +67,8 @@ steps:
       "."
     ]
 
-- name: gcr.io/cloud-builders/docker
-  id: "Build threads image"
+- id: "Build threads-service"
+  name: gcr.io/cloud-builders/docker
   dir: threads
   args:
     [
@@ -29,8 +77,8 @@ steps:
       "."
     ]
 
-- name: gcr.io/cloud-builders/docker
-  id: "Build users image"
+- id: "Build users-service"
+  name: gcr.io/cloud-builders/docker
   dir: users
   args:
     [
@@ -39,71 +87,77 @@ steps:
       "."
     ]
 
-# ----------------------------------------------------
-# Smoke Test Each Microservice Container BEFORE Deployment
-# ----------------------------------------------------
+# =========================================================
+# 3. TEST CONTAINER PORTS + SMOKE TEST API ROUTES
+# =========================================================
 
-- name: gcr.io/cloud-builders/docker
-  id: "Test posts-service"
+# --- Posts service tests ---
+- id: "Test posts-service"
+  name: gcr.io/cloud-builders/docker
   entrypoint: bash
   args:
     - "-c"
     - |
-        echo "Running smoke test for posts-service..."
+        echo "Testing posts-service..."
         docker run -d --rm -p 3001:3000 --name posts-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA
         sleep 5
-        curl -f http://localhost:3001/api/posts || (echo "Posts service test FAILED" && exit 1)
-        echo "Posts service test PASSED"
+        nc -z localhost 3001 || (echo "Port check FAILED for posts-service" && exit 1)
+        curl -f http://localhost:3001/api/posts || (echo "Posts service API FAILED" && exit 1)
+        echo "Posts tests PASSED"
         docker stop posts-test
 
-- name: gcr.io/cloud-builders/docker
-  id: "Test threads-service"
+# --- Threads service tests ---
+- id: "Test threads-service"
+  name: gcr.io/cloud-builders/docker
   entrypoint: bash
   args:
     - "-c"
     - |
-        echo "Running smoke test for threads-service..."
+        echo "Testing threads-service..."
         docker run -d --rm -p 3002:3000 --name threads-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA
         sleep 5
-        curl -f http://localhost:3002/api/threads || (echo "Threads service test FAILED" && exit 1)
-        echo "Threads service test PASSED"
+        nc -z localhost 3002 || (echo "Port check FAILED for threads-service" && exit 1)
+        curl -f http://localhost:3002/api/threads || (echo "Threads service API FAILED" && exit 1)
+        echo "Threads tests PASSED"
         docker stop threads-test
 
-- name: gcr.io/cloud-builders/docker
-  id: "Test users-service"
+# --- Users service tests ---
+- id: "Test users-service"
+  name: gcr.io/cloud-builders/docker
   entrypoint: bash
   args:
     - "-c"
     - |
-        echo "Running smoke test for users-service..."
+        echo "Testing users-service..."
         docker run -d --rm -p 3003:3000 --name users-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA
         sleep 5
-        curl -f http://localhost:3003/api/users || (echo "Users service test FAILED" && exit 1)
-        echo "Users service test PASSED"
+        nc -z localhost 3003 || (echo "Port check FAILED for users-service" && exit 1)
+        curl -f http://localhost:3003/api/users || (echo "Users service API FAILED" && exit 1)
+        echo "Users tests PASSED"
         docker stop users-test
 
-# ----------------------------------------------------
-# Push Images to Artifact Registry
-# ----------------------------------------------------
+# =========================================================
+# 4. PUSH IMAGES TO ARTIFACT REGISTRY
+# =========================================================
 
-- name: gcr.io/cloud-builders/docker
-  id: "Push posts image"
+- id: "Push posts image"
+  name: gcr.io/cloud-builders/docker
   args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"]
 
-- name: gcr.io/cloud-builders/docker
-  id: "Push threads image"
+- id: "Push threads image"
+  name: gcr.io/cloud-builders/docker
   args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"]
 
-- name: gcr.io/cloud-builders/docker
-  id: "Push users image"
+- id: "Push users image"
+  name: gcr.io/cloud-builders/docker
   args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA"]
 
-# ----------------------------------------------------
-# Deploy Services to Cloud Run
-# ----------------------------------------------------
+# =========================================================
+# 5. DEPLOY EACH CLOUD RUN MICROSERVICE
+# =========================================================
 
-- name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  id: "Deploy posts-service"
+- id: "Deploy posts-service"
+  name: gcr.io/google.com/cloudsdktool/cloud-sdk
   entrypoint: gcloud
   args:
     [
@@ -115,8 +169,8 @@ steps:
       "--port=3000"
     ]
 
-- name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  id: "Deploy threads-service"
+- id: "Deploy threads-service"
+  name: gcr.io/google.com/cloudsdktool/cloud-sdk
   entrypoint: gcloud
   args:
     [
@@ -128,8 +182,8 @@ steps:
       "--port=3000"
     ]
 
-- name: gcr.io/google.com/cloudsdktool/cloud-sdk
-  id: "Deploy users-service"
+- id: "Deploy users-service"
+  name: gcr.io/google.com/cloudsdktool/cloud-sdk
   entrypoint: gcloud
   args:
     [
@@ -141,9 +195,9 @@ steps:
       "--port=3000"
     ]
 
-# ----------------------------------------------------
-# Image outputs (visible in Cloud Build history)
-# ----------------------------------------------------
+# =========================================================
+# Image Output Metadata
+# =========================================================
 images:
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"
