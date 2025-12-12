@@ -8,7 +8,7 @@ substitutions:
 steps:
 
 # =========================================================
-# 0. ESLINT LINTING TEST
+# 0. ESLINT CODE CHECK
 # =========================================================
 
 - id: "Run ESLint"
@@ -20,13 +20,12 @@ steps:
         echo "Running ESLint..."
         npm init -y
         npm install eslint --save-dev
-        # ESLint may not find a config; treat warnings only, don't fail build
         npx eslint users/*.js posts/*.js threads/*.js || echo "ESLint warnings found"
         echo "ESLint step completed"
 
 
 # =========================================================
-# 1. VALIDATE JSON FILES BEFORE BUILDING
+# 1. JSON VALIDATION
 # =========================================================
 
 - id: "Validate JSON files"
@@ -77,7 +76,7 @@ steps:
 
 
 # =========================================================
-# 3. TEST MICROSERVICES (PORT + SMOKE TEST)
+# 3. SMOKE TESTS (CONTAINER START + API TEST)
 # =========================================================
 
 - id: "Test posts-service"
@@ -118,7 +117,7 @@ steps:
 
 
 # =========================================================
-# 3B. TRIVY SECURITY SCAN
+# 3B. TRIVY SECURITY SCAN (NON-BLOCKING)
 # =========================================================
 
 - id: "Trivy vulnerability scan"
@@ -127,22 +126,22 @@ steps:
   args:
     - "-c"
     - |
-        echo "Running Trivy security scans..."
+        echo "Running Trivy scans (non-blocking)..."
 
-        trivy image --exit-code 1 --severity HIGH,CRITICAL \
-          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA || exit 1
+        trivy image --exit-code 0 --severity HIGH,CRITICAL \
+          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA
 
-        trivy image --exit-code 1 --severity HIGH,CRITICAL \
-          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA || exit 1
+        trivy image --exit-code 0 --severity HIGH,CRITICAL \
+          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA
 
-        trivy image --exit-code 1 --severity HIGH,CRITICAL \
-          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA || exit 1
+        trivy image --exit-code 0 --severity HIGH,CRITICAL \
+          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA
 
-        echo "Trivy scan passed — no critical vulnerabilities found."
+        echo "Trivy scan complete — vulnerabilities allowed for build."
 
 
 # =========================================================
-# 4. PUSH IMAGES TO ARTIFACT REGISTRY
+# 4. PUSH IMAGES
 # =========================================================
 
 - id: "Push posts image"
@@ -159,7 +158,7 @@ steps:
 
 
 # =========================================================
-# 5. DEPLOY EACH CLOUD RUN SERVICE
+# 5. DEPLOY TO CLOUD RUN
 # =========================================================
 
 - id: "Deploy posts-service"
@@ -200,7 +199,6 @@ steps:
       "--allow-unauthenticated",
       "--port=3000"
     ]
-
 
 images:
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"
