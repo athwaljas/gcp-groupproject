@@ -11,7 +11,6 @@ steps:
 # 0. LINTING TESTS (ESLint + Dockerfile lint)
 # =========================================================
 
-# Install dependencies and run ESLint on JS files
 - id: "Run ESLint"
   name: "node:18"
   entrypoint: bash
@@ -24,18 +23,17 @@ steps:
         npx eslint users/*.js posts/*.js threads/*.js || (echo "Linting FAILED" && exit 1)
         echo "ESLint PASSED"
 
-# Lint Dockerfiles using hadolint
 - id: "Lint Dockerfiles"
   name: "ghcr.io/hadolint/hadolint:latest"
   entrypoint: sh
   args:
     - "-c"
     - |
-        echo "Linting Dockerfiles..."
         hadolint users/Dockerfile || exit 1
         hadolint posts/Dockerfile || exit 1
         hadolint threads/Dockerfile || exit 1
         echo "Dockerfile lint PASSED"
+
 
 # =========================================================
 # 1. VALIDATE JSON FILES BEFORE BUILDING
@@ -47,11 +45,11 @@ steps:
   args:
     - "-c"
     - |
-        echo "Validating JSON files..."
         node -e "JSON.parse(require('fs').readFileSync('./users/db.json'))" || exit 1
         node -e "JSON.parse(require('fs').readFileSync('./posts/db.json'))" || exit 1
         node -e "JSON.parse(require('fs').readFileSync('./threads/db.json'))" || exit 1
-        echo "JSON validation PASSED"
+        echo 'JSON validation passed.'
+
 
 # =========================================================
 # 2. BUILD DOCKER IMAGES
@@ -87,54 +85,71 @@ steps:
       "."
     ]
 
+
 # =========================================================
-# 3. TEST CONTAINER PORTS + SMOKE TEST API ROUTES
+# 3. TEST CONTAINERS (PORT CHECKS + SMOKE TESTS)
 # =========================================================
 
-# --- Posts service tests ---
 - id: "Test posts-service"
   name: gcr.io/cloud-builders/docker
   entrypoint: bash
   args:
     - "-c"
     - |
-        echo "Testing posts-service..."
         docker run -d --rm -p 3001:3000 --name posts-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA
         sleep 5
         nc -z localhost 3001 || (echo "Port check FAILED for posts-service" && exit 1)
-        curl -f http://localhost:3001/api/posts || (echo "Posts service API FAILED" && exit 1)
-        echo "Posts tests PASSED"
+        curl -f http://localhost:3001/api/posts || (echo "Posts API FAILED" && exit 1)
         docker stop posts-test
 
-# --- Threads service tests ---
 - id: "Test threads-service"
   name: gcr.io/cloud-builders/docker
   entrypoint: bash
   args:
     - "-c"
     - |
-        echo "Testing threads-service..."
         docker run -d --rm -p 3002:3000 --name threads-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA
         sleep 5
         nc -z localhost 3002 || (echo "Port check FAILED for threads-service" && exit 1)
-        curl -f http://localhost:3002/api/threads || (echo "Threads service API FAILED" && exit 1)
-        echo "Threads tests PASSED"
+        curl -f http://localhost:3002/api/threads || (echo "Threads API FAILED" && exit 1)
         docker stop threads-test
 
-# --- Users service tests ---
 - id: "Test users-service"
   name: gcr.io/cloud-builders/docker
   entrypoint: bash
   args:
     - "-c"
     - |
-        echo "Testing users-service..."
         docker run -d --rm -p 3003:3000 --name users-test $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA
         sleep 5
         nc -z localhost 3003 || (echo "Port check FAILED for users-service" && exit 1)
-        curl -f http://localhost:3003/api/users || (echo "Users service API FAILED" && exit 1)
-        echo "Users tests PASSED"
+        curl -f http://localhost:3003/api/users || (echo "Users API FAILED" && exit 1)
         docker stop users-test
+
+
+# =========================================================
+# 3B. TRIVY SECURITY SCAN
+# =========================================================
+
+- id: "Trivy vulnerability scan"
+  name: "aquasec/trivy:latest"
+  entrypoint: "sh"
+  args:
+    - "-c"
+    - |
+        echo "🔍 Running Trivy security scans..."
+
+        trivy image --exit-code 1 --severity HIGH,CRITICAL \
+          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA || exit 1
+
+        trivy image --exit-code 1 --severity HIGH,CRITICAL \
+          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA || exit 1
+
+        trivy image --exit-code 1 --severity HIGH,CRITICAL \
+          $_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA || exit 1
+
+        echo "✅ Trivy scan passed — no critical vulnerabilities found."
+
 
 # =========================================================
 # 4. PUSH IMAGES TO ARTIFACT REGISTRY
@@ -152,8 +167,9 @@ steps:
   name: gcr.io/cloud-builders/docker
   args: ["push", "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/users-service:$COMMIT_SHA"]
 
+
 # =========================================================
-# 5. DEPLOY EACH CLOUD RUN MICROSERVICE
+# 5. DEPLOY EACH CLOUD RUN SERVICE
 # =========================================================
 
 - id: "Deploy posts-service"
@@ -195,9 +211,6 @@ steps:
       "--port=3000"
     ]
 
-# =========================================================
-# Image Output Metadata
-# =========================================================
 images:
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/posts-service:$COMMIT_SHA"
   - "$_REGION-docker.pkg.dev/$PROJECT_ID/$_REPO_NAME/threads-service:$COMMIT_SHA"
